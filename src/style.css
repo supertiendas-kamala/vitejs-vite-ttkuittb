@@ -105,3 +105,38 @@ select, input[type="date"], input[type="number"], input[type="text"], input[type
 .perfecto { background: linear-gradient(135deg, #2ecc71, #27ae60); }
 .faltante { background: linear-gradient(135deg, #e74c3c, #c0392b); }
 .sobrante { background: linear-gradient(135deg, #3498db, #2980b9); }
+/* ESTILOS V17 - ESTADÍSTICAS Y GUARDADO */
+
+.ticket-info {
+    background: #e8f5e9;
+    padding: 10px;
+    text-align: center;
+    border-radius: 8px;
+    color: #2e7d32;
+    margin-top: 10px;
+    font-size: 14px;
+  }
+  
+  .ticket-info strong {
+    display: block;
+    font-size: 18px;
+  }
+  
+  .btn-guardar-cierre {
+    background: #34495e;
+    color: white;
+    border: none;
+    width: 100%;
+    padding: 15px;
+    border-radius: 8px;
+    font-weight: bold;
+    font-size: 16px;
+    margin-top: 30px; /* Separado del resto */
+    margin-bottom: 20px;
+    cursor: pointer;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+  }
+  
+  .btn-guardar-cierre:active {
+    transform: scale(0.98);
+  }
