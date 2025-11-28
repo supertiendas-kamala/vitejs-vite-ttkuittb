@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './style.css';
 import { db } from './firebase'; 
-import { collection, addDoc, setDoc, onSnapshot, deleteDoc, doc, query, orderBy, limit, getDocs, where } from 'firebase/firestore';
+import { collection, addDoc, setDoc, onSnapshot, deleteDoc, doc, query, orderBy, limit, getDocs, where, getDoc } from 'firebase/firestore';
 
 export default function App() {
   const [vista, setVista] = useState('LOGIN'); 
@@ -42,8 +42,8 @@ export default function App() {
   });
   const [passAdmin, setPassAdmin] = useState('');
   
-  // RECARGAS
-  const [baseRecargas, setBaseRecargas] = useState(928000); 
+  // RECARGAS (AHORA CON BASE EN LA NUBE)
+  const [baseRecargas, setBaseRecargas] = useState(928000); // Valor por defecto visual
   const [rSaldoPlataforma, setRSaldoPlataforma] = useState(''); 
   const [rEfectivoFisico, setREfectivoFisico] = useState(''); 
   const [rComision, setRComision] = useState(''); 
@@ -69,7 +69,7 @@ export default function App() {
     return `${fecha}_${sedeLimpia}_${turno}`;
   };
 
-  // 1. ESCUCHAR TODO
+  // 1. ESCUCHAR COMPRAS (CON FILTRO ESTRICTO)
   useEffect(() => {
     const qCompras = query(collection(db, "movimientos"), orderBy("hora", "desc"));
     const unsubscribeCompras = onSnapshot(qCompras, (snapshot) => {
@@ -81,13 +81,35 @@ export default function App() {
       const datos = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
       setItemsRestaurante(datos);
     });
+    
+    // NUEVO: LEER LA BASE DE RECARGAS DE LA NUBE
+    const leerBaseRecargas = async () => {
+        const docRef = doc(db, "configuracion", "base_recargas");
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+            setBaseRecargas(docSnap.data().valor);
+        } else {
+            // Si no existe, la creamos con el valor inicial
+            await setDoc(doc(db, "configuracion", "base_recargas"), { valor: 928000 });
+        }
+    };
+    leerBaseRecargas();
+
     return () => { unsubscribeCompras(); unsubscribeRest(); };
   }, []);
 
-  // 2. RECUPERAR CIERRE
+  // 2. RECUPERAR O LIMPIAR CIERRE
   useEffect(() => {
     const idCierre = generarIdCierre();
     if (!idCierre) return;
+
+    // LIMPIEZA PREVENTIVA (Para que Fer no vea datos viejos)
+    setZSistema(''); setDevoluciones(''); setEfectivoVentas('');
+    setDatafono(''); setQrDatafono(''); setQrBancolombiaRiv(''); setQrBancolombiaBar(''); setQrBold(''); setDaviKamalaRiv(''); setDaviKamalaBar('');
+    setCantVentas(''); setCantDatafonos(''); setCierreYaGuardado(false);
+    setRSaldoPlataforma(''); setREfectivoFisico(''); setRComision('');
+    setBancosConciliados({ datafono: false, qrDatafono: false, qrRiv: false, qrBar: false, qrBold: false, daviRiv: false, daviBar: false });
+    setIdsFacturasAuditadas([]);
 
     const unsubscribe = onSnapshot(doc(db, "cierres_turnos", idCierre), (docSnap) => {
       if (docSnap.exists()) {
@@ -101,14 +123,8 @@ export default function App() {
         setCantVentas(datos.numVentas || ''); setCantDatafonos(datos.numDatafonos || '');
         if (datos.auditoriaBancos) setBancosConciliados(datos.auditoriaBancos);
         if (datos.facturasAuditadas) setIdsFacturasAuditadas(datos.facturasAuditadas);
-      } else {
-        setCierreYaGuardado(false);
-        setZSistema(''); setDevoluciones(''); setEfectivoVentas('');
-        setDatafono(''); setQrDatafono(''); setQrBancolombiaRiv(''); setQrBancolombiaBar(''); setQrBold(''); setDaviKamalaRiv(''); setDaviKamalaBar('');
-        setCantVentas(''); setCantDatafonos('');
-        setBancosConciliados({ datafono: false, qrDatafono: false, qrRiv: false, qrBar: false, qrBold: false, daviRiv: false, daviBar: false });
-        setIdsFacturasAuditadas([]);
-      }
+      } 
+      // Si no existe, ya limpiamos arriba, así que queda en blanco perfecto para Fer.
     });
     return () => unsubscribe();
   }, [fecha, sede, turno]);
@@ -136,28 +152,42 @@ export default function App() {
     setDatosTurno(null); setVista('LOGIN'); setSede(''); setCajero(''); setTurno(''); 
     setSaldoInicial(''); setZSistema(''); setDevoluciones(''); setEfectivoVentas(''); 
     setDatafono(''); setQrDatafono(''); setQrBancolombiaRiv(''); setQrBancolombiaBar(''); setQrBold(''); setDaviKamalaRiv(''); setDaviKamalaBar('');
-    setCantVentas(''); setCantDatafonos(''); setRSaldoPlataforma(''); setREfectivoFisico(''); setRComision(''); setValorModificarBase(''); setMostrarInputBase(false); setBaseRecargas(928000); 
+    setCantVentas(''); setCantDatafonos(''); setRSaldoPlataforma(''); setREfectivoFisico(''); setRComision(''); setValorModificarBase(''); setMostrarInputBase(false); 
     setIdsFacturasAuditadas([]); setBancosConciliados({ datafono: false, qrDatafono: false, qrRiv: false, qrBar: false, qrBold: false, daviRiv: false, daviBar: false }); 
   };
   
-  // REGISTRAMOS CON SEDE Y TURNO
   const registrarEnCaja = async (desc, val, tipo) => { await addDoc(collection(db, "movimientos"), { proveedor: desc, monto: parseFloat(val), tipoPago: 'Efectivo', tipo: tipo, hora: new Date().toLocaleTimeString(), fecha: fecha, sede: sede, turno: turno }); };
   const agregarCompra = async () => { if (!proveedor || !monto) return alert('Faltan datos'); await addDoc(collection(db, "movimientos"), { proveedor, monto: parseFloat(monto), tipoPago: tipoMovimiento === 'INGRESO' ? 'Efectivo' : tipoPago, tipo: tipoMovimiento, hora: new Date().toLocaleTimeString(), fecha: fecha, sede: sede, turno: turno }); setProveedor(''); setMonto(''); };
   const borrarCompra = async (id) => { if (window.confirm("¿Seguro de borrar?")) { await deleteDoc(doc(db, "movimientos", id)); } };
-  const prestarRestaurante = async () => { if (!conceptoRest || !valorRest) return alert('Faltan datos'); await addDoc(collection(db, "deudas_restaurante"), { id: Date.now(), concepto: conceptoRest, valor: parseFloat(valorRest), fecha: fecha }); registrarEnCaja(`Préstamo Rest: ${conceptoRest}`, valorRest, 'GASTO'); setConceptoRest(''); setValorRest(''); alert('✅ Deuda registrada en Nube.'); };
+  const prestarRestaurante = async () => { if (!conceptoRest || !valorRest) return alert('Faltan datos'); await addDoc(collection(db, "deudas_restaurante"), { id: Date.now(), concepto: conceptoRest, valor: parseFloat(valorRest), fecha: fecha, sede: sede, turno: turno }); registrarEnCaja(`Préstamo Rest: ${conceptoRest}`, valorRest, 'GASTO'); setConceptoRest(''); setValorRest(''); alert('✅ Deuda registrada en Nube.'); };
   const toggleSeleccion = (id) => { if (idsSeleccionados.includes(id)) { setIdsSeleccionados(prev => prev.filter(i => i !== id)); } else { setIdsSeleccionados(prev => [...prev, id]); } };
   const cobrarRestaurante = async () => { if (idsSeleccionados.length === 0) return alert('Selecciona qué van a pagar'); const itemsAPagar = itemsRestaurante.filter(item => idsSeleccionados.includes(item.id)); const totalPagar = itemsAPagar.reduce((acc, curr) => acc + curr.valor, 0); registrarEnCaja('Pago Deuda Restaurante', totalPagar, 'INGRESO'); for (let item of itemsAPagar) { await deleteDoc(doc(db, "deudas_restaurante", item.id)); } setIdsSeleccionados([]); alert(`✅ ¡Pago registrado!`); };
   const borrarDeudaRestaurante = async (id) => { if (window.confirm("¿Seguro borrar esta deuda?")) { await deleteDoc(doc(db, "deudas_restaurante", id)); } };
-  const modificarBase = () => { if (!valorModificarBase) return; const valor = parseFloat(valorModificarBase); if (tipoModificacion === 'SUMAR') { setBaseRecargas(baseRecargas + valor); alert(`✅ Base aumentada. Nueva: $${(baseRecargas + valor).toLocaleString()}`); } else { setBaseRecargas(baseRecargas - valor); alert(`🎄 Retiro aplicado. Nueva: $${(baseRecargas - valor).toLocaleString()}`); } setValorModificarBase(''); setMostrarInputBase(false); };
+  
+  // NUEVO: MODIFICAR BASE Y GUARDARLA EN LA NUBE
+  const modificarBase = async () => { 
+    if (!valorModificarBase) return; 
+    const valor = parseFloat(valorModificarBase);
+    let nuevaBase = baseRecargas;
+    
+    if (tipoModificacion === 'SUMAR') { nuevaBase = baseRecargas + valor; alert(`✅ Base aumentada. Nueva: $${nuevaBase.toLocaleString()}`); } 
+    else { nuevaBase = baseRecargas - valor; alert(`🎄 Retiro aplicado. Nueva: $${nuevaBase.toLocaleString()}`); }
+    
+    setBaseRecargas(nuevaBase);
+    // GUARDAR EN FIREBASE
+    await setDoc(doc(db, "configuracion", "base_recargas"), { valor: nuevaBase });
+    setValorModificarBase(''); setMostrarInputBase(false); 
+  };
+
   const entrarAdmin = () => { if (passAdmin === '1234') { setVista('ADMIN'); setPassAdmin(''); } else { alert('❌ Contraseña incorrecta'); } };
   const toggleFacturaAuditada = (id) => { if (idsFacturasAuditadas.includes(id)) setIdsFacturasAuditadas(idsFacturasAuditadas.filter(i => i !== id)); else setIdsFacturasAuditadas([...idsFacturasAuditadas, id]); };
   const toggleBanco = (key) => setBancosConciliados({ ...bancosConciliados, [key]: !bancosConciliados[key] });
 
-  // --- FILTRO CORREGIDO (COMPATIBLE CON LO VIEJO) ---
+  // FILTRO CORREGIDO (Estricto para Sede y Turno)
   const movimientosDelDia = listaCompras.filter(m => 
       m.fecha === fecha && 
-      (m.sede === sede || !m.sede) && // Muestra si coincide SEDE o si NO TIENE sede (viejos)
-      (m.turno === turno || !m.turno) // Muestra si coincide TURNO o si NO TIENE turno (viejos)
+      m.sede === sede && // Debe ser de la misma sede
+      m.turno === turno  // Debe ser del mismo turno
   );
 
   const totalGastadoEfectivo = movimientosDelDia.filter(c => c.tipo === 'GASTO' && c.tipoPago === 'Efectivo').reduce((acc, curr) => acc + curr.monto, 0);
