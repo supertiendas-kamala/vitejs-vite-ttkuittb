@@ -42,8 +42,8 @@ export default function App() {
   });
   const [passAdmin, setPassAdmin] = useState('');
   
-  // RECARGAS (AHORA CON BASE EN LA NUBE)
-  const [baseRecargas, setBaseRecargas] = useState(928000); // Valor por defecto visual
+  // RECARGAS
+  const [baseRecargas, setBaseRecargas] = useState(928000); 
   const [rSaldoPlataforma, setRSaldoPlataforma] = useState(''); 
   const [rEfectivoFisico, setREfectivoFisico] = useState(''); 
   const [rComision, setRComision] = useState(''); 
@@ -69,7 +69,7 @@ export default function App() {
     return `${fecha}_${sedeLimpia}_${turno}`;
   };
 
-  // 1. ESCUCHAR COMPRAS (CON FILTRO ESTRICTO)
+  // 1. CARGAR DATOS
   useEffect(() => {
     const qCompras = query(collection(db, "movimientos"), orderBy("hora", "desc"));
     const unsubscribeCompras = onSnapshot(qCompras, (snapshot) => {
@@ -82,28 +82,24 @@ export default function App() {
       setItemsRestaurante(datos);
     });
     
-    // NUEVO: LEER LA BASE DE RECARGAS DE LA NUBE
+    // Leer Base Recargas
     const leerBaseRecargas = async () => {
         const docRef = doc(db, "configuracion", "base_recargas");
         const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-            setBaseRecargas(docSnap.data().valor);
-        } else {
-            // Si no existe, la creamos con el valor inicial
-            await setDoc(doc(db, "configuracion", "base_recargas"), { valor: 928000 });
-        }
+        if (docSnap.exists()) { setBaseRecargas(docSnap.data().valor); }
+        else { await setDoc(doc(db, "configuracion", "base_recargas"), { valor: 928000 }); }
     };
     leerBaseRecargas();
 
     return () => { unsubscribeCompras(); unsubscribeRest(); };
   }, []);
 
-  // 2. RECUPERAR O LIMPIAR CIERRE
+  // 2. RECUPERAR CIERRE
   useEffect(() => {
     const idCierre = generarIdCierre();
     if (!idCierre) return;
 
-    // LIMPIEZA PREVENTIVA (Para que Fer no vea datos viejos)
+    // LIMPIEZA
     setZSistema(''); setDevoluciones(''); setEfectivoVentas('');
     setDatafono(''); setQrDatafono(''); setQrBancolombiaRiv(''); setQrBancolombiaBar(''); setQrBold(''); setDaviKamalaRiv(''); setDaviKamalaBar('');
     setCantVentas(''); setCantDatafonos(''); setCierreYaGuardado(false);
@@ -124,12 +120,11 @@ export default function App() {
         if (datos.auditoriaBancos) setBancosConciliados(datos.auditoriaBancos);
         if (datos.facturasAuditadas) setIdsFacturasAuditadas(datos.facturasAuditadas);
       } 
-      // Si no existe, ya limpiamos arriba, así que queda en blanco perfecto para Fer.
     });
     return () => unsubscribe();
   }, [fecha, sede, turno]);
 
-  // 3. BUSCAR SALDO SUGERIDO
+  // 3. SUGERIDO
   useEffect(() => {
       const fetchUltimoCierreSede = async () => {
           if (!sede) return;
@@ -142,15 +137,60 @@ export default function App() {
                   const sugerido = (parseFloat(data.saldoFinalCompras) || 0) + (parseFloat(data.ventaEfectivoSolo) || 0);
                   setSaldoSugerido(sugerido);
               } else { setSaldoSugerido(null); }
-          } catch (e) { console.log("Error buscando sugerido", e); }
+          } catch (e) { console.log("Error", e); }
       };
       fetchUltimoCierreSede();
   }, [sede]);
 
+  // --- NUEVA FUNCIÓN: DESCARGAR EXCEL (CSV) ---
+  const descargarReporte = async () => {
+    try {
+        // Traemos todos los cierres ordenados por fecha
+        const q = query(collection(db, "cierres_turnos"), orderBy("timestamp", "desc"));
+        const querySnapshot = await getDocs(q);
+        const datos = querySnapshot.docs.map(doc => doc.data());
+
+        if (datos.length === 0) return alert("No hay datos para descargar");
+
+        // Creamos el encabezado del archivo Excel
+        let csvContent = "data:text/csv;charset=utf-8,";
+        csvContent += "Fecha,Sede,Turno,Cajero,Venta Real Total,Efectivo Ventas,Total Bancos,Gastos Compras,Descuadre,Ticket Promedio\n";
+
+        // Llenamos las filas
+        datos.forEach(row => {
+            // Evitamos errores si algun dato falta
+            const fila = [
+                row.fecha,
+                row.sede,
+                row.turno,
+                row.cajero,
+                row.ventaReal || 0,
+                row.ventaEfectivoSolo || 0,
+                (row.ventaReal - (row.ventaEfectivoSolo || 0)) || 0, // Total bancos calculado
+                (row.saldoFinalCompras ? "Ver detalle" : 0), // Simplificado
+                row.descuadre || 0,
+                row.ticketPromedio || 0
+            ].join(",");
+            csvContent += fila + "\n";
+        });
+
+        // Truco para descargar el archivo
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", "Reporte_Kamala.csv");
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+    } catch (error) {
+        alert("Error descargando: " + error.message);
+    }
+  };
+
   const iniciarTurno = () => { if (sede && cajero && turno) { setDatosTurno({ sede, cajero, turno, fecha }); setVista('MENU'); } else alert('⚠️ Completa los datos.'); };
   const cerrarSesion = () => { 
-    setDatosTurno(null); setVista('LOGIN'); setSede(''); setCajero(''); setTurno(''); 
-    setSaldoInicial(''); setZSistema(''); setDevoluciones(''); setEfectivoVentas(''); 
+    setDatosTurno(null); setVista('LOGIN'); setSede(''); setCajero(''); setTurno(''); setSaldoInicial(''); setZSistema(''); setDevoluciones(''); setEfectivoVentas(''); 
     setDatafono(''); setQrDatafono(''); setQrBancolombiaRiv(''); setQrBancolombiaBar(''); setQrBold(''); setDaviKamalaRiv(''); setDaviKamalaBar('');
     setCantVentas(''); setCantDatafonos(''); setRSaldoPlataforma(''); setREfectivoFisico(''); setRComision(''); setValorModificarBase(''); setMostrarInputBase(false); 
     setIdsFacturasAuditadas([]); setBancosConciliados({ datafono: false, qrDatafono: false, qrRiv: false, qrBar: false, qrBold: false, daviRiv: false, daviBar: false }); 
@@ -163,33 +203,20 @@ export default function App() {
   const toggleSeleccion = (id) => { if (idsSeleccionados.includes(id)) { setIdsSeleccionados(prev => prev.filter(i => i !== id)); } else { setIdsSeleccionados(prev => [...prev, id]); } };
   const cobrarRestaurante = async () => { if (idsSeleccionados.length === 0) return alert('Selecciona qué van a pagar'); const itemsAPagar = itemsRestaurante.filter(item => idsSeleccionados.includes(item.id)); const totalPagar = itemsAPagar.reduce((acc, curr) => acc + curr.valor, 0); registrarEnCaja('Pago Deuda Restaurante', totalPagar, 'INGRESO'); for (let item of itemsAPagar) { await deleteDoc(doc(db, "deudas_restaurante", item.id)); } setIdsSeleccionados([]); alert(`✅ ¡Pago registrado!`); };
   const borrarDeudaRestaurante = async (id) => { if (window.confirm("¿Seguro borrar esta deuda?")) { await deleteDoc(doc(db, "deudas_restaurante", id)); } };
-  
-  // NUEVO: MODIFICAR BASE Y GUARDARLA EN LA NUBE
   const modificarBase = async () => { 
-    if (!valorModificarBase) return; 
-    const valor = parseFloat(valorModificarBase);
+    if (!valorModificarBase) return; const valor = parseFloat(valorModificarBase); 
     let nuevaBase = baseRecargas;
-    
     if (tipoModificacion === 'SUMAR') { nuevaBase = baseRecargas + valor; alert(`✅ Base aumentada. Nueva: $${nuevaBase.toLocaleString()}`); } 
     else { nuevaBase = baseRecargas - valor; alert(`🎄 Retiro aplicado. Nueva: $${nuevaBase.toLocaleString()}`); }
-    
     setBaseRecargas(nuevaBase);
-    // GUARDAR EN FIREBASE
-    await setDoc(doc(db, "configuracion", "base_recargas"), { valor: nuevaBase });
+    await setDoc(doc(db, "configuracion", "base_recargas"), { valor: nuevaBase }); // Guardar en nube
     setValorModificarBase(''); setMostrarInputBase(false); 
   };
-
   const entrarAdmin = () => { if (passAdmin === '1234') { setVista('ADMIN'); setPassAdmin(''); } else { alert('❌ Contraseña incorrecta'); } };
   const toggleFacturaAuditada = (id) => { if (idsFacturasAuditadas.includes(id)) setIdsFacturasAuditadas(idsFacturasAuditadas.filter(i => i !== id)); else setIdsFacturasAuditadas([...idsFacturasAuditadas, id]); };
   const toggleBanco = (key) => setBancosConciliados({ ...bancosConciliados, [key]: !bancosConciliados[key] });
 
-  // FILTRO CORREGIDO (Estricto para Sede y Turno)
-  const movimientosDelDia = listaCompras.filter(m => 
-      m.fecha === fecha && 
-      m.sede === sede && // Debe ser de la misma sede
-      m.turno === turno  // Debe ser del mismo turno
-  );
-
+  const movimientosDelDia = listaCompras.filter(m => m.fecha === fecha && m.sede === sede && m.turno === turno);
   const totalGastadoEfectivo = movimientosDelDia.filter(c => c.tipo === 'GASTO' && c.tipoPago === 'Efectivo').reduce((acc, curr) => acc + curr.monto, 0);
   const totalIngresado = movimientosDelDia.filter(c => c.tipo === 'INGRESO').reduce((acc, curr) => acc + curr.monto, 0);
   const valorSaldoInicial = parseFloat(saldoInicial) || 0;
@@ -245,5 +272,16 @@ export default function App() {
   <div className="form-card"><h3>1. Datos del Sistema (Aliaddo)</h3><div className="row"><div className="half"><label>Valor Cierre Z:</label><input type="number" placeholder="0" value={zSistema} onChange={(e) => setZSistema(e.target.value)} /></div><div className="half"><label>Devoluciones:</label><input type="number" placeholder="0" value={devoluciones} onChange={(e) => setDevoluciones(e.target.value)} /></div></div><div className="resultado-intermedio">Venta Z REAL: <strong>${zReal.toLocaleString()}</strong></div></div><div className="form-card"><h3>2. Ingresa el Dinero</h3><label>💵 Efectivo en Ventas:</label><input type="number" className="input-full" placeholder="$ Efectivo billetes y monedas" value={efectivoVentas} onChange={(e) => setEfectivoVentas(e.target.value)} />{prestamoDeVentas > 0 && (<div className="aviso-prestamo"><span>⚠️ Préstamo tomado para Compras:</span><strong>+${prestamoDeVentas.toLocaleString()}</strong></div>)}<h4 className="subtitulo-bancos">Bancos y QRs</h4><div className="grid-bancos"><div><label>Datafono:</label><input type="number" placeholder="$" value={datafono} onChange={(e) => setDatafono(e.target.value)} /></div><div><label>QR Datáfono (Antes Davi):</label><input type="number" placeholder="$" value={qrDatafono} onChange={(e) => setQrDatafono(e.target.value)} /></div><div><label>QR Rivera:</label><input type="number" placeholder="$ Bancolombia" value={qrBancolombiaRiv} onChange={(e) => setQrBancolombiaRiv(e.target.value)} /></div><div><label>QR Barcelona:</label><input type="number" placeholder="$ Bancolombia" value={qrBancolombiaBar} onChange={(e) => setQrBancolombiaBar(e.target.value)} /></div><div><label>QR BOLD:</label><input type="number" placeholder="$" value={qrBold} onChange={(e) => setQrBold(e.target.value)} /></div><div><label>🔴 DaviKamala Rivera:</label><input type="number" placeholder="$" value={daviKamalaRiv} onChange={(e) => setDaviKamalaRiv(e.target.value)} /></div><div><label>🔴 DaviKamala Barce:</label><input type="number" placeholder="$" value={daviKamalaBar} onChange={(e) => setDaviKamalaBar(e.target.value)} /></div></div><div className="resultado-intermedio">Total Dinero + Bancos + Préstamos: <strong>${totalVentaRegistrada.toLocaleString()}</strong></div></div><div className="form-card"><h3>3. Estadísticas del Turno</h3><div className="row"><div className="half"><label>🧾 No. Facturas:</label><input type="number" placeholder="Cant. Ventas" value={cantVentas} onChange={(e) => setCantVentas(e.target.value)} /></div><div className="half"><label>💳 No. Datáfonos:</label><input type="number" placeholder="Cant. Transac" value={cantDatafonos} onChange={(e) => setCantDatafonos(e.target.value)} /></div></div><div className="ticket-info">Ticket Promedio: <strong>${ticketPromedio.toLocaleString(undefined, {maximumFractionDigits: 0})}</strong></div></div><div className={`veredicto-card ${descuadre === 0 ? 'perfecto' : descuadre < 0 ? 'faltante' : 'sobrante'}`}><h3>Resultado del Cuadre</h3><p className="gran-numero">${descuadre.toLocaleString()}</p><p className="mensaje-estado">{descuadre === 0 ? '✅ ¡CUADRE PERFECTO!' : descuadre < 0 ? '❌ FALTANTE (OJO)' : '⚠️ SOBRANTE (REVISA)'}</p></div><button className="btn-guardar-cierre" onClick={guardarCierreTurno}>💾 GUARDAR CIERRE Y ESTADÍSTICAS</button></div> ); }
   if (vista === 'RESTAURANTE') { return ( <div className="dashboard-container"><div className="top-bar"><button className="btn-back" onClick={() => setVista('MENU')}>⬅ Volver</button><h2>Restaurante</h2></div><div className="form-card"><h3>📤 Registrar Nuevo Préstamo</h3><div className="row"><input className="input-largo" placeholder="¿Qué se llevaron? (Ej: Papas)" value={conceptoRest} onChange={(e) => setConceptoRest(e.target.value)} /></div><div className="row"><input type="number" placeholder="Valor ($)" value={valorRest} onChange={(e) => setValorRest(e.target.value)} /><button className="btn-add bg-orange" onClick={prestarRestaurante}>PRESTAR</button></div><p className="nota-mini">* Esto restará dinero de tu caja automáticamente.</p></div><div className="lista-compras"><h3>📥 Cuentas por Cobrar</h3>{itemsRestaurante.length === 0 ? (<p className="empty-msg">El restaurante está a paz y salvo. ✅</p>) : (<div>{itemsRestaurante.map((item) => (<div key={item.id} className={`item-compra ${idsSeleccionados.includes(item.id) ? 'seleccionado' : ''}`} onClick={() => toggleSeleccion(item.id)}><div className="check-area"><div className={`checkbox-custom ${idsSeleccionados.includes(item.id) ? 'checked' : ''}`} onClick={(e) => {e.stopPropagation(); toggleSeleccion(item.id)}}></div></div><div className="info"><span className="hora">{item.fecha}</span><strong>{item.concepto}</strong></div><div className="valor text-red">-${item.valor.toLocaleString()}</div><button className="btn-delete" style={{marginLeft: '10px', fontSize: '16px'}} onClick={(e) => {e.stopPropagation(); borrarDeudaRestaurante(item.id)}}>🗑️</button></div>))}<button className="btn-cobrar" onClick={cobrarRestaurante}>RECIBIR PAGO DE LO SELECCIONADO 💰</button></div>)}</div></div> ); }
   if (vista === 'RECARGAS') { return ( <div className="dashboard-container"><div className="top-bar"><button className="btn-back" onClick={() => setVista('MENU')}>⬅ Volver</button><h2>Recargas</h2></div><div className="card-informativa"><strong>Base Actual:</strong> ${baseRecargas.toLocaleString()}{!mostrarInputBase ? (<div style={{marginTop: '10px'}}><button className="btn-link" onClick={() => {setTipoModificacion('SUMAR'); setMostrarInputBase(true)}}>+ Sumar Comisión</button><button className="btn-link text-red" onClick={() => {setTipoModificacion('RESTAR'); setMostrarInputBase(true)}}>🎄 Sacar Cena/Gastos</button></div>) : (<div className="input-base-container"><span style={{fontSize:'12px', marginRight:'5px'}}>{tipoModificacion === 'SUMAR' ? 'Sumar:' : 'Restar:'}</span><input type="number" placeholder="Valor" value={valorModificarBase} onChange={(e) => setValorModificarBase(e.target.value)} /><button className="btn-small-ok" onClick={modificarBase}>OK</button><button className="btn-small-cancel" onClick={() => setMostrarInputBase(false)}>X</button></div>)}</div><div className="form-card"><h3>1. Información de Plataforma</h3><label>📲 Saldo Final en Sistema:</label><input type="number" className="input-full" placeholder="Lo que dice la app de recargas" value={rSaldoPlataforma} onChange={(e) => setRSaldoPlataforma(e.target.value)} /><div className="calculo-recargas">Debes tener en efectivo: <br/><strong>${efectivoEsperado > 0 ? efectivoEsperado.toLocaleString() : '0'}</strong></div></div><div className="form-card"><h3>2. Conteo de Dinero</h3><label>💵 Efectivo Físico Recargas:</label><input type="number" className="input-full" placeholder="Lo que contaste" value={rEfectivoFisico} onChange={(e) => setREfectivoFisico(e.target.value)} /></div><div className={`veredicto-card ${descuadreRecargas === 0 ? 'perfecto' : descuadreRecargas < 0 ? 'faltante' : 'sobrante'}`}><h3>Estado de Recargas</h3><p className="gran-numero">${descuadreRecargas.toLocaleString()}</p><p className="mensaje-estado">{descuadreRecargas === 0 ? '✅ ¡CUADRE PERFECTO!' : descuadreRecargas < 0 ? '❌ FALTANTE DE DINERO' : '⚠️ SOBRANTE DE DINERO'}</p></div><div className="form-card mt-20"><label>📝 Registro de Comisión (Informativo):</label><input type="number" className="input-comision" placeholder="Ganancia del día" value={rComision} onChange={(e) => setRComision(e.target.value)} /></div></div> ); }
-  if (vista === 'ADMIN') { return ( <div className="dashboard-container"><div className="top-bar admin-header"><button className="btn-back white-text" onClick={() => setVista('MENU')}>⬅ Salir</button><h2>Panel de la Jefa 👑</h2></div><div className="form-card"><h3>🏦 Conciliación Bancaria del Día</h3><p className="nota-mini">Marca lo que ya confirmaste que llegó al banco:</p><div className="lista-checks"><div className="item-check" onClick={() => toggleBanco('datafono')}><div className={`checkbox-sq ${bancosConciliados.datafono ? 'checked' : ''}`}></div><span>Datafono Rivera (${datafono || 0})</span></div><div className="item-check" onClick={() => toggleBanco('qrDatafono')}><div className={`checkbox-sq ${bancosConciliados.qrDatafono ? 'checked' : ''}`}></div><span>QR Datáfono (${qrDatafono || 0})</span></div><div className="item-check" onClick={() => toggleBanco('qrRiv')}><div className={`checkbox-sq ${bancosConciliados.qrRiv ? 'checked' : ''}`}></div><span>QR Bancolombia Rivera (${qrBancolombiaRiv || 0})</span></div><div className="item-check" onClick={() => toggleBanco('qrBar')}><div className={`checkbox-sq ${bancosConciliados.qrBar ? 'checked' : ''}`}></div><span>QR Bancolombia Barcelona (${qrBancolombiaBar || 0})</span></div><div className="item-check" onClick={() => toggleBanco('qrBold')}><div className={`checkbox-sq ${bancosConciliados.qrBold ? 'checked' : ''}`}></div><span>QR BOLD Unificado (${qrBold || 0})</span></div><div className="item-check" onClick={() => toggleBanco('daviRiv')}><div className={`checkbox-sq ${bancosConciliados.daviRiv ? 'checked' : ''}`}></div><span>DaviKamala Rivera (${daviKamalaRiv || 0})</span></div><div className="item-check" onClick={() => toggleBanco('daviBar')}><div className={`checkbox-sq ${bancosConciliados.daviBar ? 'checked' : ''}`}></div><span>DaviKamala Barce (${daviKamalaBar || 0})</span></div></div><div className="total-conciliado">Total Conciliado: <strong>${totalConciliado.toLocaleString()}</strong></div><button className="btn-guardar-cierre" style={{marginTop:'10px', background:'#27ae60'}} onClick={guardarRevisionAdmin}>💾 GUARDAR VISTO BUENO</button></div><div className="form-card"><h3>📝 Auditoría de Facturas</h3><p className="nota-mini">Revisa contra el papel físico:</p>{movimientosDelDia.filter(c => c.tipo === 'GASTO').length === 0 ? (<p className="empty-msg">No hay gastos registrados hoy.</p>) : (movimientosDelDia.filter(c => c.tipo === 'GASTO').map((item) => (<div key={item.id} className="item-compra" onClick={() => toggleFacturaAuditada(item.id)}><div className="check-area"><div className={`checkbox-sq ${idsFacturasAuditadas.includes(item.id) ? 'checked' : ''}`}></div></div><div className="info"><span className="hora">{item.hora}</span><strong>{item.proveedor}</strong><span className="tipo-pago">{item.tipoPago}</span></div><div className="valor text-red">-${item.monto.toLocaleString()}</div></div>)))}</div></div> ); }
+  
+  // PANEL DE LA JEFA CON BOTÓN DE EXCEL
+  if (vista === 'ADMIN') { return ( <div className="dashboard-container"><div className="top-bar admin-header"><button className="btn-back white-text" onClick={() => setVista('MENU')}>⬅ Salir</button><h2>Panel de la Jefa 👑</h2></div>
+  
+  {/* BOTÓN DE DESCARGAR EXCEL */}
+  <div className="form-card" style={{textAlign:'center', backgroundColor:'#e8f5e9'}}>
+    <h3>📊 Reportes y Estadísticas</h3>
+    <p className="nota-mini">Descarga toda la base de datos a tu PC:</p>
+    <button className="btn-guardar-cierre" style={{marginTop:'10px', background:'#2e7d32'}} onClick={descargarReporte}>📥 DESCARGAR REPORTE EXCEL</button>
+  </div>
+
+  <div className="form-card"><h3>🏦 Conciliación Bancaria del Día</h3><p className="nota-mini">Marca lo que ya confirmaste que llegó al banco:</p><div className="lista-checks"><div className="item-check" onClick={() => toggleBanco('datafono')}><div className={`checkbox-sq ${bancosConciliados.datafono ? 'checked' : ''}`}></div><span>Datafono Rivera (${datafono || 0})</span></div><div className="item-check" onClick={() => toggleBanco('qrDatafono')}><div className={`checkbox-sq ${bancosConciliados.qrDatafono ? 'checked' : ''}`}></div><span>QR Datáfono (${qrDatafono || 0})</span></div><div className="item-check" onClick={() => toggleBanco('qrRiv')}><div className={`checkbox-sq ${bancosConciliados.qrRiv ? 'checked' : ''}`}></div><span>QR Bancolombia Rivera (${qrBancolombiaRiv || 0})</span></div><div className="item-check" onClick={() => toggleBanco('qrBar')}><div className={`checkbox-sq ${bancosConciliados.qrBar ? 'checked' : ''}`}></div><span>QR Bancolombia Barcelona (${qrBancolombiaBar || 0})</span></div><div className="item-check" onClick={() => toggleBanco('qrBold')}><div className={`checkbox-sq ${bancosConciliados.qrBold ? 'checked' : ''}`}></div><span>QR BOLD Unificado (${qrBold || 0})</span></div><div className="item-check" onClick={() => toggleBanco('daviRiv')}><div className={`checkbox-sq ${bancosConciliados.daviRiv ? 'checked' : ''}`}></div><span>DaviKamala Rivera (${daviKamalaRiv || 0})</span></div><div className="item-check" onClick={() => toggleBanco('daviBar')}><div className={`checkbox-sq ${bancosConciliados.daviBar ? 'checked' : ''}`}></div><span>DaviKamala Barce (${daviKamalaBar || 0})</span></div></div><div className="total-conciliado">Total Conciliado: <strong>${totalConciliado.toLocaleString()}</strong></div><button className="btn-guardar-cierre" style={{marginTop:'10px', background:'#27ae60'}} onClick={guardarRevisionAdmin}>💾 GUARDAR VISTO BUENO</button></div><div className="form-card"><h3>📝 Auditoría de Facturas</h3><p className="nota-mini">Revisa contra el papel físico:</p>{movimientosDelDia.filter(c => c.tipo === 'GASTO').length === 0 ? (<p className="empty-msg">No hay gastos registrados hoy.</p>) : (movimientosDelDia.filter(c => c.tipo === 'GASTO').map((item) => (<div key={item.id} className="item-compra" onClick={() => toggleFacturaAuditada(item.id)}><div className="check-area"><div className={`checkbox-sq ${idsFacturasAuditadas.includes(item.id) ? 'checked' : ''}`}></div></div><div className="info"><span className="hora">{item.hora}</span><strong>{item.proveedor}</strong><span className="tipo-pago">{item.tipoPago}</span></div><div className="valor text-red">-${item.monto.toLocaleString()}</div></div>)))}</div></div> ); }
 }
